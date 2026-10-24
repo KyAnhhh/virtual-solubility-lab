@@ -4,27 +4,36 @@
 Tiếp tục project hiện có thành MVP nước/đường/cát/dầu, auto/manual stirring, khoa học giáo dục có bảo toàn khối lượng, kết quả/giải thích, pause/resume/reset và static artifact. Không backend, nhiệt độ hoặc CFD.
 
 ## Next Step
-Hoàn thành đợt chuẩn bị bàn giao local (V4-07, V4-08, V4-09, V4-10):
-- Sửa phân loại V4-10 thành PARTIAL (Core/unit verified 548/548 tests, real browser context loss/restore pending/BLOCKED do chưa kiểm chứng qua trình duyệt thực tế). Ghi nhận đúng hợp đồng `preventDefault()` của WebGL.
-- V4-08 COMPLETED_VERIFIED: Hoàn thiện tài liệu README.md và docs/SCIENTIFIC_ASSUMPTIONS.md với hướng dẫn cài đặt, dev, preview, test, thao tác, 3 kịch bản thí nghiệm, phân biệt nút điều khiển, giới hạn giáo dục chưa calibrated và cơ chế khôi phục WebGL.
-- V4-09 PARTIAL: Nghiệm thu local production HTTP preview artifact tại http://localhost:4173/ với mã HTTP 200 và MIME types đúng chuẩn cho index.html, CSS, JS bundle và lazy chunk LaboratoryScene. Browser production UI smoke ghi nhận pending.
-- V4-07 PARTIAL: Rà soát production call paths, phát hiện và sửa 4 lỗi (chặn resume/startAuto khi mất context, stale canvas revision callback fencing, retryable React.lazy dynamic chunk loader, UI disabled guard trên ControlPanel); 11/11 tests pass trong contextFailure.test.ts.
-- Toàn bộ 548/548 tests pass qua 29 test suites, typecheck/lint/build exit 0. Dừng theo chỉ đạo, sẵn sàng bàn giao local cho người dùng.
+- Người dùng kiểm tra trực quan cơ chế kéo chạm cốc 500 ml tự nâng lên rót trên browser (`http://localhost:4173/`).
+- Sẵn sàng bàn giao hoặc tiếp tục các yêu cầu nâng cấp tiếp theo của người dùng.
 
 ## Current Phase
-Phase 4 (Integration & Quality).
-- V4-08: COMPLETED_VERIFIED (Tài liệu sử dụng README.md và docs/SCIENTIFIC_ASSUMPTIONS.md hoàn thiện, sư phạm, chuẩn xác 100% với source code).
-- V4-07: PARTIAL (Core/unit verified 548/548 tests; đã sửa 4 lỗi production path; browser interaction regression pending).
-- V4-09: PARTIAL (Local production HTTP artifact verified với HTTP 200 và MIME types chuẩn; browser production smoke pending).
-- V4-10: PARTIAL (Core/unit verified 548/548 tests across 29 suites; real browser context loss/restore pending).
-- V4-05: PARTIAL (User xác nhận kéo thìa thủ công; 2 screenshots Edge headless; benchmark và full 7-step checklist browser tự động pending/BLOCKED).
-- V1-06: PARTIAL (Core verified, 4 cốc nguồn 3D độc lập mass ledger; browser QA pending).
-- V4-04: PARTIAL (Core verified 16/16 tests; kết quả pha tiếng Việt sạch, N/A khi W=0, <0,1g, hysteresis, responsive 390px review; browser QA pending).
-- V4-03: PARTIAL (Core verified 17/17 tests; 4 fixtures hình học SPEC §4, trao đổi giọt dầu Ol <-> Od; browser QA pending).
-- V4-02: PARTIAL (Core verified 14/14 tests; Gu_bed/Gu_susp, cát Sb/Ss, lắng tự nhiên, bed reservation 113ml; browser QA pending).
-- V4-01: COMPLETED_VERIFIED (Mở rộng early bridge cho đầy đủ phase/render outputs, 18/18 tests pass).
-- V3-08: COMPLETED_VERIFIED (Stability, 36,000 ticks, replay 30/60/120 FPS, 16/16 tests pass).
-- Toàn bộ 548 unit & integration tests pass across 29 test suites (`npm test`), `npm run typecheck`, `npm run lint`, `npm run build` exit 0.
+Phase 4 (Integration & Quality) — Đã hoàn thành toàn diện nâng cấp cơ chế tương tác kéo cốc chạm cốc 500 ml tự nâng lên rót, kiểm thử hình học perspective camera thực tế và giao diện tinh gọn:
+- Hoàn thành toàn bộ các yêu cầu:
+  1. *Đường kéo hình học thực tế (không phân nhánh test/runtime)*:
+     - Chuẩn hóa mặt phẳng kéo đứng (vertical drag plane) đi qua đường nối từ vị trí cốc nguồn tới tâm cốc 500 ml, có pháp tuyến hướng về phía camera.
+     - Hàm kiểm thử `createCameraRay(cameraPos, targetPoint)` mô phỏng chính xác tia chiếu perspective từ vị trí camera qua điểm mục tiêu trên màn hình/bàn thí nghiệm.
+     - Kiểm thử thành công cả góc camera mặc định `[3.9, 3.4, 5.5]` và góc camera xoay `[-4.0, 3.4, 4.0]`. Đường kéo chứng minh tính liên tục (độ dịch chuyển mỗi bước $\le 0.35$, không teleport, kẹp an toàn trong phạm vi bàn).
+  2. *Kéo cốc chạm cốc 500 ml thì tự nâng lên rót*:
+     - Tiếp xúc 3D nhận diện tự động khi $d_{xz} \le 1.50$, $y \le 2.82$. Người dùng không cần tự nâng cốc lên cao và không cần thả chuột để kích hoạt.
+     - Sau khi chạm: Cốc tự động bay thẳng lên cao độ an toàn $Y \ge 2.45$ (vượt vành cốc 2.32), lướt qua miệng cốc, nghiêng rót nguyên liệu vào trong, sau đó dựng thẳng và lướt về vị trí cũ trên bàn.
+     - Rót theo lượng: Snapshot liều lúc bấm chuột, chạm là chốt commit một lần duy nhất; nhả chuột sau tiếp xúc không làm gián đoạn animation. Nhả chuột trước tiếp xúc hủy với lượng thêm bằng 0.
+     - Rót tự do: Chạm cốc kích hoạt giai đoạn nâng (`lifting`); giữ chuột để rót liên tục theo nhịp 10Hz; nhả chuột khi đang nâng thì hủy với lượng 0; nhả chuột khi đang rót thì chốt toàn bộ decitick nguyên và dừng. Người dùng không cần giữ chuột trong halo trên cao khi đang rót.
+  3. *Thông báo ngắn, rõ ràng*:
+     - Hủy trước tiếp xúc: `"Kéo cốc nguyên liệu chạm cốc lớn để rót."`
+     - Nhấn phím Escape: `"Đã dừng thao tác."`
+     - Đạt dung tích tối đa: `"Cốc 500 ml đã đầy. Không thể thêm tiếp."`
+     - Thông báo thành công: Sử dụng khối lượng được chấp nhận từ sổ cái động cơ (`bridge.add`).
+  4. *Giao diện tinh gọn, tối ưu không gian 3D*:
+     - Rót tự do: Ẩn hoàn toàn ô nhập và nút "+ Thêm", hiển thị nhãn tốc độ rót và gợi ý ngắn gọn.
+     - Rót theo lượng: Cảnh báo inline màu đỏ cạnh ô nhập khi số không hợp lệ hoặc vượt ngưỡng tối đa.
+     - Thu gọn khối camera gesture thành mục collapsible `<details>` cùng nút "Đặt lại góc nhìn" nhỏ gọn; tinh gọn padding các bảng để tối đa hóa diện tích Canvas 3D.
+- Kết quả kiểm chứng chất lượng toàn diện:
+  * 36/36 test files passed (623/623 tests passed, bao gồm 37/37 tests cho `vesselInteraction.test.ts`).
+  * `npm run typecheck` mã thoát 0 (`tsc --noEmit`).
+  * `npm run lint` mã thoát 0 (`eslint .`).
+  * `npm run build` mã thoát 0 (dist sinh hoàn chỉnh trong 9.27s).
+  * Preview server HTTP 200 tại `http://localhost:4173/`.
 
 ## Nguồn chuẩn
 - [IMPLEMENTATION_TASKS.md](docs/IMPLEMENTATION_TASKS.md): duy nhất task/status/deps/input-output/O-L-P.

@@ -1,5 +1,204 @@
 # Findings
 
+## Triển Khai Chặng 2: Rót Tự Do Bằng Chuột & Bảo Toàn Chế Độ Rót Theo Lượng — 2026-10-19
+- **Mục tiêu:** Mở rộng trải nghiệm rót cốc thành 2 chế độ độc lập và rõ ràng: "Rót theo lượng" (By Dose) và "Rót tự do" (Free Pouring), giữ vững tính toàn vẹn khoa học (authoritative engine ledger, bảo toàn khối lượng, giới hạn dung tích 500 ml).
+- **1. Kiến Trúc & Thiết Kế Kỹ Thuật Chặng 2:**
+  - *Chuyển đổi chế độ rõ ràng (Mode Selector & State Machine):*
+    - Bổ sung segmented switch `Rót theo lượng` / `Rót tự do` trên `IngredientPanel`.
+    - Khi đang kéo cốc hoặc đang rót (`isBusy`), khóa chuyển đổi chế độ để bảo toàn tính bất biến của phiên thao tác.
+    - Trong chế độ Rót tự do: Các ô input liều lượng được vô hiệu hóa kèm giải thích `Chế độ Rót tự do không cần nhập lượng. Giữ chuột để rót lượng mong muốn.` Nút "+ Thêm" được làm mờ với chú thích `Kéo cốc vào miệng cốc 500 ml và giữ chuột để rót tự do.`
+  - *Tọa độ kéo thô (Un-snapped Drag Anchor) & Khử Snap-locking Drop Zone:*
+    - Khi kéo cốc vào Drop Zone, cốc nghiêng về tư thế rót tại `SPOUT_TARGET` $(-0.50, 2.75, 0.0)$. Tuy nhiên, việc đánh giá thành viên vùng nhận (Hysteresis) PHẢI luôn thực hiện trên tọa độ giao điểm ray-mặt phẳng kéo của con trỏ chuột (`dragPosition` un-snapped), TUYỆT ĐỐI KHÔNG dựa trên tọa độ đã snap `SPOUT_TARGET`. Nhờ đó, người dùng tự do di chuột ra khỏi miệng cốc bất kỳ lúc nào mà không bị kẹt dính.
+  - *Tách biệt trạng thái tần suất cao khỏi Zustand:*
+    - Vị trí con trỏ `dragPosition` (60–120 Hz) được lưu trong controller ref / memory của `VesselPourAdapter`. `updateVesselDragPos` cập nhật tọa độ tại chỗ và CHỈ dispatch Zustand `set()` khi cờ `isInsideDropZone` chuyển trạng thái boolean (false <-> true), triệt tiêu hoàn toàn hiện tượng giật lag do re-render React tree ở tần số cao.
+  - *Bộ đếm nhịp dòng chảy & Batching 10 Hz vào Engine:*
+    - Khi cốc đạt tư thế rót ($\text{tiltProgress} \ge 0.98$), dòng chảy kích hoạt. Thời gian nghiêng $0.25\text{ s}$ KHÔNG tính vào lượng chất rót ra.
+    - Tốc độ thao tác chuẩn hóa: Nước $25\text{ ml/s}$, Dầu $15\text{ ml/s}$, Đường $10\text{ g/s}$, Cát $10\text{ g/s}$.
+    - Bộ đếm nhịp gom tích lũy decitick theo thời gian thực và phát hành gói batch vào `bridge.add()` ở nhịp ~10 Hz (mỗi $100\text{ ms}$).
+    - Nếu con trỏ rời khỏi Drop Zone trong lúc đang giữ chuột: Dòng chảy ngắt lập tức, cốc tự động chuyển tiếp dựng đứng lại, thời gian bên ngoài không bị tích lũy; khi quay lại vùng nhận, dòng chảy tái kích hoạt mượt mà.
+  - *Quy tắc dừng sạch khi nhả chuột (Pointer Up Flush & Stop):*
+    - Khi người dùng nhả chuột (`pointerup`), dòng chảy ngắt ngay lập tức.
+    - Toàn bộ số decitick nguyên còn lại trong tích lũy (`accumulatedDeciTicks`) được flush nốt 1 lần cuối vào engine.
+    - Phần dư lẻ $< 1\text{ decitick}$ ($< 0.1\text{ ml}$ hoặc $< 0.1\text{ g}$) được hủy bỏ hoàn toàn (strict drop).
+  - *Ngưỡng gián đoạn hiển thị (Presentation Interruption Threshold):*
+    - Nếu $\Delta t > 300\text{ ms}$ (do lag, chuyển tab nền, thu nhỏ cửa sổ trình duyệt), hệ thống bỏ qua khoảng thời gian này, tuyệt đối không dồn bù lượng chất của thời gian đóng băng (no backfilling).
+  - *Bảo toàn dung tích 500 ml & Trạng thái Reset:*
+    - Đánh giá dung tích dựa trên `occupiedVolumeMilliMl`. Khi cốc 500 ml đầy, dòng chảy tự động ngắt và khóa rót, nhãn hiển thị thông báo đầy cốc.
+    - Gọi `bridge.getVesselAdapter()?.onReset()` khi simulation reset: Hủy bỏ ngay lập tức phiên rót dở dang, giải phóng pointer capture, khôi phục camera OrbitControls và vô hiệu hóa các batch đến muộn (stale batches).
+- **2. Kết Quả Kiểm Chứng Toàn Diện:**
+  - `src/simulation/tests/vesselInteraction.test.ts`: Đạt 18/18 tests pass (9 test Chặng 1 + 9 test Chặng 2).
+  - Toàn bộ test suite: 36/36 files pass, 604/604 tests pass 100%.
+  - `npm run typecheck`: Exit code 0 (không còn bất kỳ lỗi TypeScript nào).
+  - `npm run lint`: Exit code 0.
+  - `npm run build`: Exit code 0 (dist sinh hoàn chỉnh).
+  - Preview server: Đang phục vụ tại `http://localhost:4173/`, phản hồi HTTP 200.
+
+## Triển Khai Chặng 1: Nền Tảng Tương Tác Cốc & Kéo-Thả Rót Theo Lượng — 2026-10-19
+- **Mục tiêu:** Cho phép người dùng trực tiếp hover, click chuột trái kéo cốc nguồn (Nước, Đường, Cát, Dầu) và thả vào vùng nhận của cốc 500ml để rót đúng lượng đã nhập trên form; nếu thả ngoài hoặc nhấn Escape / mất focus thì cốc tự trượt về vị trí cũ an toàn.
+- **1. Kiến Trúc & Thiết Kế Triển Khai:**
+  - *Adapter độc quyền & Triệt tiêu Circular Dependency:*
+    Tạo `VesselPourAdapter.ts` quản lý pointer capture, chiếu ray lên vertical drag plane, kiểm tra ranh giới Hysteresis drop zone ($R \le 0.45$ vào, $R \le 0.75$ duy trì) và token fencing. Decouple hoàn toàn khỏi `experimentStore` thông qua interface `VesselPourStoreTarget` và `storeGetter`, giải quyết triệt để lỗi circular dependency trong toàn dự án.
+  - *Đóng băng liều lượng (Snapshot Dose Immutability):*
+    Khi bắt đầu kéo (`pointerdown`), lượng nguyên liệu được snapshot cố định từ ô nhập. Nếu người dùng sửa ô nhập trong lúc đang kéo cốc thì liều của phiên kéo hiện tại không bị thay đổi.
+  - *Vùng nhận cốc (Drop Zone) & Chỉ dẫn tương tác trực quan:*
+    Component `DropZoneIndicator` đặt trên miệng cốc 500ml với vòng hào quang xoay pulsing và nhãn nổi hướng dẫn ("Kéo cốc tới đây để rót" -> "✓ Thả chuột để rót"). Con trỏ chuột chuyển động mượt: `grab` khi hover, `grabbing` khi kéo, `auto` khi buông.
+  - *Chuyển động rót & Cam kết liều (Commit Pour):*
+    Khi thả vào Drop Zone, cốc chuyển tiếp mượt mà từ vị trí thả (`dropPos`) tới tư thế nghiêng rót ($1.45$s), cam kết (commit) chính xác 1 lần vào authoritative engine tại $t = 0.30$s, dòng rót tuôn vào cốc 500ml rồi cốc tự động bay về vị trí ban đầu trên bàn. Thả ngoài vùng hoặc nhấn Escape thì cốc trượt về chỗ cũ không thêm hóa chất.
+- **2. Kết Quả Kiểm Chứng Quality Gates:**
+  - `src/simulation/tests/vesselInteraction.test.ts`: 9/9 tests pass 100%.
+  - Toàn bộ test suite: 36/36 test files, 595/595 tests pass.
+  - `npm run typecheck`, `npm run lint`, `npm run build`: Exit code 0.
+  - Preview server: Đang phục vụ tại `http://localhost:4173/`, phản hồi HTTP 200.
+
+## Khắc Phục Lỗi Nước/Dầu Biến Dạng Lòi Ra Ngoài Khi Nghiêng Cốc & Sắc Vàng Ở Đáy Cốc 500ml — 2026-10-18
+- **Mục tiêu:** Khắc phục triệt để hai lỗi hiển thị:
+  1. Khi nghiêng cốc nguồn rót nước hoặc dầu, chất lỏng bị lòi ra ngoài vỏ cốc thủy tinh.
+  2. Đáy cốc thí nghiệm 500ml có sắc vàng/nâu, dễ nhầm với lớp cát cặn.
+- **1. Nguyên Nhân Thực Tế & Giải Pháp Khắc Phục Lỗi Biến Dạng / Lòi Chất Lỏng (Bug 1):**
+  - *Nguyên nhân thực tế:*
+    Trong `SingleStockVessel` trước đây, khối trụ chất lỏng được đặt trong một `<group rotation={[0, 0, transform.contentCounterRotationZ]}>` với `contentCounterRotationZ = tilt`. Khi cốc nghiêng một góc $\theta$ quanh trục Z, khối trụ chất lỏng bị phản xoay một góc $+\theta$ để giữ phương thẳng đứng trong hệ tọa độ thế giới (world space). Vì khối trụ chất lỏng có cùng bán kính và chiều cao với lòng cốc, khi lòng cốc nghiêng $\theta = 49^\circ$ còn khối trụ đứng thẳng, các cạnh và đáy của khối trụ lập tức đâm xuyên qua thành kính và đáy cốc, lộ ra ngoài không gian.
+  - *Giải pháp hình học chuẩn xác:*
+    1. *Khóa chặt chất lỏng theo hệ tọa độ cốc:* Loại bỏ toàn bộ `contentCounterRotationZ`. Toàn bộ khối trụ chất lỏng (`radius = 0.355`, chiều cao $H_v = 1.05$) quay cùng cốc, luôn nằm gọn 100% bên trong thành kính cốc nguồn ($R_{inner} = 0.38$).
+    2. *Cắt phẳng theo trọng lực bằng Clipping Plane:* Kích hoạt `gl.localClippingEnabled = true` trên Canvas. Sử dụng một mặt phẳng cắt Three.js `THREE.Plane(new Vector3(0, -1, 0), worldSurfaceY)` trong tọa độ thế giới với pháp tuyến hướng xuống dưới. Vị trí mặt thoáng trong world space được tính toán liên tục:
+       $$Y_{surface} = Y_{pos} + (0.04 + h_c) \cos \theta$$
+       Khi cốc nghiêng, mặt phẳng cắt gọt bỏ phần chất lỏng phía trên, đảm bảo bề mặt chất lỏng luôn nằm ngang tuyệt đối theo trọng lực.
+    3. *Mặt thoáng elip bịt kín miệng cắt (Elliptical Meniscus Cap):*
+       Tiết diện giao giữa hình trụ nghiêng góc $\theta$ và mặt phẳng nằm ngang là một hình elip với bán trục nhỏ $b = R = 0.355$ và bán trục lớn $a = R / \cos \theta$. Đặt một đĩa elip tại độ cao $0.04 + h_c$ trong cốc, xoay góc $+\theta$ quanh trục Z (để pháp tuyến world luôn là $(0, 1, 0)$) và co giãn theo trục X với tỷ lệ $1 / \cos \theta$.
+       Do $x^2 / a^2 + z^2 / b^2 \le 1 \iff (x \cos \theta)^2 + z^2 \le R^2 < R_{inner}^2$, toàn bộ chu vi elip luôn nằm khít bên trong thành trong của cốc tại mọi góc nghiêng $\theta \in [0, 49^\circ]$, không bao giờ bị hở mép hay thò ra ngoài.
+    4. *Bảo toàn mức chất lỏng $h_c$ và dòng rót:*
+       Khi nghiêng quá góc tràn $\theta_{spill} \approx 39.6^\circ$, mức chất lỏng $h_c$ được kẹp theo công thức $h_c \le (H_v - R_v \tan \theta)$ để mép nước chạm đúng mỏm rót. Trong pha rót (1.15s - 1.65s), $h_c$ giảm dần biểu thị lượng nước/dầu đang rót ra. Dòng rót `PouringStream` nhận tọa độ miệng rót động từ ma trận world của cốc (`spoutPos`), bắt nguồn chính xác từ mỏm rót vật lý và rơi theo đường cong trọng lực vào lòng cốc 500ml.
+- **2. Nguyên Nhân Thực Tế & Giải Pháp Khắc Phục Sắc Vàng Ở Đáy Cốc 500ml (Bug 2):**
+  - *Nguyên nhân thực tế:*
+    1. *Khởi tạo InstancedMesh mặc định count:* Trong `src/scene/ParticleRenderer.tsx`, các thẻ `<instancedMesh args={[undefined, undefined, MAX_POOL_CAPACITY]} />` (cho hạt cát `sand` và `sand_suspended`) không có thuộc tính `count={0}` ban đầu trong JSX. Three.js mặc định khởi tạo `count = 700` với ma trận đơn vị tại $[0, 0, 0]$ (chính là đáy cốc) mang màu vàng cát `#c89650`, tạo nên một lớp đĩa hạt vàng rực ở đáy cốc ngay khi vừa mount trước hoặc giữa các chu kỳ cập nhật.
+    2. *Bỏ sót ẩn bed volume mesh khi count = 0:* Trong `ParticleRenderer.tsx`, điều kiện `if (stamp.count === 0) { zeroAllMeshes(); return; }` thoát sớm trước khi cập nhật khối trụ thể tích cặn cát (`sandBedMeshVolRef`). Đồng thời hàm `zeroAllMeshes()` không gán `sandBedMeshVolRef.current.visible = false`, khiến khối trụ cặn cát vẫn hiển thị dù cốc trống rỗng.
+    3. *Tích lũy màu kính và z-fighting trong Beaker.tsx:* Đáy cốc (`cylinderGeometry`) và các vòng torus đáy có màu ngả vàng/xanh ấm (`#cce6ed`, `#b1cdd5`) với `depthWrite: true`, chồng lấn lên nhau và đè lên bóng bàn (`contactShadows`), tạo thành vệt sẫm màu vàng-nâu dưới đáy.
+  - *Giải pháp khắc phục triệt để:*
+    1. Thiết lập `count={0}` tường minh cho toàn bộ 5 `<instancedMesh>` trong `ParticleRenderer.tsx` ngay khi mount.
+    2. Trong `zeroAllMeshes()`, bổ sung lệnh ẩn trực tiếp `sandBedMeshVolRef.current.visible = false` và `sugarBedMeshVolRef.current.visible = false`.
+    3. Đưa phần kiểm tra và cập nhật `visible` của `sandBedMeshVolRef` và `sugarBedMeshVolRef` lên trước mọi lệnh thoát sớm; chỉ cho phép hiện khi khối lượng cặn tương ứng $\ge 0.001$ g.
+    4. Đồng bộ hóa màu kính của `Beaker.tsx` sang tông xanh xám lạnh trung tính cao cấp:
+       - Thành cốc: `color="#e2f0f4"`, `opacity={0.16}`, `roughness={0.06}`, `depthWrite={false}`, `renderOrder={3}`.
+       - Đáy cốc: `color="#d5e8ee"`, `opacity={0.22}`, `roughness={0.06}`, `depthWrite={false}`, `renderOrder={2}`.
+       - Vòng torus đáy: `color="#8faec0"`, `opacity={0.45}`, `roughness={0.08}`, `depthWrite={false}`, `renderOrder={3}`.
+       Loại bỏ hoàn toàn mọi sắc thái vàng/nâu khi cốc không có cát; phân tách thứ tự render để triệt tiêu z-fighting.
+- **3. Kiểm Chứng Chất Lượng:**
+  - Bổ sung test kiểm chứng hình học clipping, elip meniscal cap và cách ly cặn cát đáy trong `src/simulation/tests/ingredientPourInteraction.test.ts`.
+  - 586/586 tests pass qua 35 test files (`npm test`).
+  - `npm run typecheck`, `npm run lint`, `npm run build` đều pass với exit code 0.
+
+## Tinh Chỉnh Trực Quan & Quỹ Đạo Rót Cốc Nguồn Phía Trên Cốc 500ml — 2026-10-18
+- **Mục tiêu:** Khắc phục triệt để hai vấn đề hình ảnh và animation:
+  1. Làm Đường và Nước khác nhau rõ rệt: Loại bỏ hoàn toàn cảm giác "cột chất lỏng trắng đục / sữa" của cốc đường, làm nước trong suốt màu xanh ngọc tươi sáng dễ phân biệt trên bàn sáng.
+  2. Đưa cốc nguồn lên cao hẳn phía trên miệng cốc 500ml trước khi nghiêng rót, không rót ngang hông hoặc va quẹt thành cốc.
+- **1. Phân Biệt Đường và Nước Rõ Rệt:**
+  - *Đường (Sugar):*
+    - Hạ thấp khối trụ nền xuống còn chiều cao $0.32$ với màu trắng ngà thô (`#e8e2d4`, độ nhám $0.96$).
+    - Bổ sung 96 tinh thể lập phương instanced (`#ffffff`, `roughness: 0.35`, `metalness: 0.08`) với phân bố seed cố định: 48 tinh thể rải đều trên chóp gồ ghề của đống đường, 48 tinh thể ép dọc theo thành kính bên trong cốc. Ánh sáng chiếu vào tạo ra các điểm sáng lấp lánh (specular glints) đa hướng, thể hiện rõ cấu trúc hạt rắn sucrose.
+    - Khi rót, đường tuôn thành 32 hạt tinh thể lập phương xoay lật (tumbling) rơi theo đường cong trọng lực vào lòng cốc, phân biệt hoàn toàn với dòng chất lỏng.
+    - Cốc thí nghiệm 500ml: Khi đường tan thành $G_d$, dung dịch nước đường hoàn toàn trong suốt không có hạt; chỉ đường chưa tan $G_u$ mới tạo cụm hạt cặn ở đáy cốc.
+  - *Nước (Water):*
+    - Màu xanh ngọc thanh khiết (`#38bdf8`), độ trong suốt `opacity: 0.46` (cốc nguồn) và `0.38` (cốc 500ml), độ nhám thấp `0.03`, phản chiếu rõ rệt mặt bàn sáng `#edf3f3` bên dưới.
+    - Mặt thoáng tròn meniscal disc (`#7dd3fc`, `opacity: 0.72`) và viền phản quang (`#bae6fd`), giữ phương nằm ngang theo trọng lực khi nghiêng cốc. Dòng rót là dải ruy-băng thuôn mượt mà.
+  - *Nhãn nhận diện & Khoảng cách:*
+    - 4 cốc nguồn bố trí khoảng cách $Z \ge 1.1$ đơn vị ($[-1.1, 0.0, 1.2, 2.3]$), loại bỏ hoàn toàn sự đè lấn nhãn.
+    - Bổ sung huy hiệu phân loại phụ ("Chất lỏng", "Hạt tinh thể", "Hạt khoáng"). Nhãn có thuộc tính `pointerEvents: 'none'` không cản trở tương tác 3D.
+- **2. Quỹ Đạo Đưa Cốc Nguồn Lên Cao Phía Trên Cốc 500ml:**
+  - *Độ cao hành trình (Flight height):* Khi bay ngang qua cốc 500ml, đáy cốc nguồn ở độ cao $Y_{base} = 2.35$, cao hơn hẳn miệng cốc 500ml ($Y_{rim} = 2.32$).
+  - *Tọa độ miệng rót cố định:* Điểm tựa miệng rót đặt tại $(X_{spout} = -0.50, Y_{spout} = 2.75, Z_{spout} = 0.0)$, tạo một khoảng không khí thẳng đứng nhìn thấy rõ ràng $0.43$ đơn vị phía trên miệng cốc 500ml ($2.32$).
+  - *Tâm quay vật lý thuận chiều kim đồng hồ:*
+    $$X_{base} = X_{spout} - H_v \sin \theta - R_v \cos \theta$$
+    $$Y_{base} = Y_{spout} - H_v \cos \theta + R_v \sin \theta$$
+    Tại góc nghiêng cực đại $\theta = 49^\circ$ ($0.85$ rad), đáy cốc nguồn tự động nâng lên $Y_{base} = 2.348 \approx 2.35 > 2.32$ và lùi sang trái $X_{base} = -1.54$, toàn bộ thân cốc nguồn lơ lửng hoàn toàn phía trên và bên ngoài miệng cốc 500ml mà không chạm vào thành hay thìa khuấy.
+  - *Dòng chảy rơi tự do:* Rơi từ $( -0.50, 2.70, 0.0 )$ xuống lòng cốc $(-0.38, Y_{dest}, 0.0)$ hoàn toàn nằm bên trong đường kính trong của cốc 500ml ($R_{in} = 0.87$).
+  - *Căn chỉnh góc nhìn camera:* Nâng vị trí camera lên `[3.9, 3.4, 5.5]`, `fov: 42`, và tâm ngắm `target: [0, 1.25, 0]`, tạo khoảng trống thoáng phía trên (headroom $> 0.7$ đơn vị), đảm bảo cốc nguồn khi nâng lên độ cao đỉnh $Y \approx 3.32$ không bị cắt mất bởi mép trên của khung nhìn.
+- **3. Kiểm Chứng Chất Lượng:**
+  - Cập nhật test suite `ingredientPourInteraction.test.ts` kiểm chứng quỹ đạo rót, tọa độ miệng rót và độ cao đáy cốc $Y_{base} \ge 2.32$.
+  - Toàn bộ 583 tests across 35 test files pass (`npm test`).
+  - `npm run typecheck`, `npm run lint`, `npm run build` đều pass sạch sẽ.
+
+## Triển Khai Hoàn Tất Nâng Cấp Trải Nghiệm Thêm Nguyên Liệu & Rót Cốc Nguồn — 2026-10-18
+- **Mục tiêu:** Khi người dùng nhấn "+ Thêm", cốc nguồn tương ứng nhấc lên, di chuyển tới cốc 500ml, nghiêng rót và trở về vị trí ban đầu. Phân biệt rõ rệt 4 cốc nguồn (đặc biệt sửa đường không còn là khối trụ trắng đục giống sữa). Đồng bộ hóa chặt chẽ với lệnh thêm nguyên liệu của động cơ khoa học mà không làm sai lệch bất kỳ đại lượng vật lý nào.
+- **1. Phân Biệt Rõ Rệt 4 Cốc Nguồn:**
+  - *Đường (Sugar):* Loại bỏ hoàn toàn khối trụ phẳng trắng đục cũ. Thay thế bằng khối nền tinh thể màu trắng ngà (`#f4eee1`, 16 phân đoạn thô) kết hợp đống ngọn dạng nón (`#faf7f0`) và 48 tinh thể đường instanced đa hướng (`#ffffff`, `roughness: 0.32`, `metalness: 0.08`) tạo phản quang lấp lánh (specular glints), nhìn rõ cấu trúc hạt rắn sucrose. Khi rót, đường chảy thành dòng 24 hạt rời rụng theo đường parabol trọng lực vào lòng cốc.
+  - *Cát (Sand):* Khối nền và đống cát màu vàng nâu đất thô ráp (`#b5894b`, `#a07436`, `roughness: 0.98`), kết hợp 48 hạt cát instanced đa sắc vàng đất (`#bf9659`, `#8c6227`). Khi rót, chảy thành dòng hạt cát rời rụng.
+  - *Nước (Water):* Dung dịch trong suốt với sắc xanh nhẹ (`#a5f3fc`, `opacity: 0.38`, `roughness: 0.05`), có mặt thoáng tròn (`#cffafe`). Khi nghiêng cốc, mặt nước tự động phản xoay (`contentCounterRotationZ = -tilt`) để giữ thăng bằng nằm ngang theo trọng lực bên trong lòng cốc.
+  - *Dầu (Oil):* Chất lỏng màu vàng hổ phách ấm (`#f59e0b`, `opacity: 0.72`, `roughness: 0.12`, `metalness: 0.02`), mặt thoáng màu vàng tươi (`#fbbf24`). Khi rót, tạo dải chất lỏng liền mạch có gợn sóng vòng tròn tại điểm tiếp xúc.
+  - *Nhãn nhận diện:* Huy hiệu HTML nổi phía trên miệng cốc chuyển thành trạng thái phát sáng xanh ngọc "Đang rót..." khi đang hoạt động, có thuộc tính `pointerEvents: 'none'` không cản trở chuột.
+- **2. Quỹ Đạo Chuyển Động & Animation Rót (2.2 Giây):**
+  - Tách toán học quỹ đạo vào module thuần túy [`src/scene/pouringAnimationMath.ts`](src/scene/pouringAnimationMath.ts) để kiểm thử độc lập 100%.
+  - Chu trình gồm 5 pha mượt mà:
+    1. *Lift ($0.0 \to 0.35$s):* Cốc nhấc thẳng đứng lên cao $0.70$ đơn vị khỏi mặt bàn.
+    2. *Move ($0.35 \to 0.85$s):* Cốc di chuyển lên cao phía trên miệng cốc 500ml ($X_{spout} = -0.75, Y_{spout} = 2.50, Z_{spout} = 0.0$).
+    3. *Tilt ($0.85 \to 1.15$s):* Cốc nghiêng góc $55^\circ$ ($0.96$ rad) quanh chính điểm miệng rót, miệng cốc giữ cố định phía trên lòng cốc 500ml.
+    4. *Pour ($1.15 \to 1.65$s):* Giữ nguyên tư thế nghiêng, kích hoạt dòng rót / hạt rơi vào bên trong lòng cốc 500ml (tọa độ $X = -0.38$, không bao giờ chạm hay xuyên thành cốc). Tại $t = 1.15$s, lệnh thêm authoritative được gửi tới động cơ.
+    5. *Return ($1.65 \to 2.20$s):* Cốc dựng thẳng đứng lại trong 40% đầu của pha quay về, sau đó di chuyển mượt mà về vị trí ban đầu và hạ nhẹ nhàng xuống bàn.
+  - *Zero Cumulative Drift:* Tọa độ khi kết thúc $t \ge 2.20$s trở về chính xác 100% tọa độ gốc $[X_0, Y_0, Z_0]$ và góc quay $0$.
+- **3. Đồng Bộ Hóa Lệnh Thêm Nguyên Liệu (Command Synchronization):**
+  - *Pre-validation:* Kiểm tra tính hợp lệ của lượng thêm và kiểm tra dung tích 500ml (`occupiedVolumeMilliMl`) trước khi nhấc cốc. Nếu không hợp lệ hoặc đầy cốc, lập tức hiển thị lý do lỗi và KHÔNG chạy animation.
+  - *Single-flight lock:* Khi một cốc đang rót (`activePour !== null`), toàn bộ nút "+ Thêm", ô nhập liệu và các nút thí nghiệm mẫu đều bị vô hiệu hóa; các lượt bấm liên tiếp bị từ chối, ngăn chặn triệt để tình trạng spam lệnh trùng.
+  - *Immutable In-Flight Dose:* Liều lượng và loại chất được đóng băng bất biến trong đối tượng `ActivePour` ngay tại thời điểm nhấn thêm. Việc người dùng gõ sửa ô nhập sau đó không làm thay đổi liều lượng đang bay.
+  - *Authoritative Dispatch:* Lệnh `bridge.add()` chỉ được gọi đúng một lần duy nhất tại thời điểm dòng rót chạm cốc ($t = 1.15$s).
+- **4. Độc Lập Thời Gian Khoa Học, Reset & Phục Hồi Lỗi:**
+  - *Khi Paused:* Người dùng vẫn có thể nhấn thêm và quan sát animation rót bình thường (sử dụng presentation clock `performance.now()`), trong khi thời gian mô phỏng khoa học `elapsedSeconds` giữ nguyên không đổi và `paused` vẫn là `true`.
+  - *Khi Reset:* Xóa ngay `activePour`, đưa cốc nguồn về vị trí cũ. Sử dụng `generation` để vô hiệu hóa bất kỳ callback commit nào phát sinh muộn từ animation cũ.
+  - *Khi Context Lost:* Hủy `activePour`, không để lệnh chờ tự ý thực thi sau khi phục hồi.
+  - *Fallback Paths:* Khi WebGL không khả dụng (`init_failed` / `context_lost`) hoặc người dùng bật `prefers-reduced-motion`, hệ thống lập tức thêm nguyên liệu trực tiếp qua cùng một command path `add()` của bridge mà không bị treo.
+- **5. Kiểm Chứng Chất Lượng:**
+  - Bổ sung test suite [`src/simulation/tests/ingredientPourInteraction.test.ts`](src/simulation/tests/ingredientPourInteraction.test.ts) (12/12 tests pass).
+  - Toàn bộ 583 bài kiểm tra qua 35 test suites đều PASS (`npm test`).
+  - TypeScript (`npm run typecheck`), ESLint (`npm run lint`), và Vite Build (`npm run build`) đều đạt mã thoát 0 sạch sẽ.
+
+## Triển Khai Thành Công 5 Nhóm Cải Tiến Tương Tác & Trực Quan Hóa (UX / Visualization Upgrades) — 2026-10-18
+- **Mục tiêu:** Nâng cấp toàn diện trải nghiệm người dùng, khả năng quan sát và tính sư phạm của phòng thí nghiệm ảo 3D qua 5 nhóm cải tiến trọng tâm mà không phá vỡ bất kỳ hằng số khoa học, định luật bảo toàn khối lượng hay kiến trúc SimulationBridge/Store.
+- **1. Nhóm 1: Dễ Nhận Biết và Kéo Thìa (Spoon Interaction & Ergonomics):**
+  - *Vùng bắt chạm vô hình (Generous hit target cylinder):* Bổ sung một hình trụ tàng hình bao quanh thân thìa với bán kính $R = 0.15$ (gấp hơn 3 lần thân thìa $0.045$) và chiều dài bao phủ toàn bộ cán thìa, giúp người dùng dễ dàng bấm trúng thìa ngay cả trên màn hình cảm ứng hoặc chuột rê nhanh.
+  - *Con trỏ chuột phản hồi động:* Khi rê chuột qua thìa, con trỏ đổi sang dạng bàn tay nắm (`cursor: grab`); khi nhấn giữ chuột và kéo, con trỏ chuyển sang `cursor: grabbing`. Đảm bảo giải phóng con trỏ về mặc định trên mọi exit path (`pointerup`, `pointercancel`, `lostpointercapture`, component unmount hoặc khi ẩn thìa).
+  - *Chỉ thị thị giác trực quan:* Thêm vòng sáng phát quang (halo ring `#38bdf8`) nổi bật quanh miệng cốc và núm tay nắm đầu thìa (`#0284c7`), báo hiệu rõ ràng khu vực tương tác cho người học.
+  - *Hướng dẫn thao tác & Phản hồi trạng thái:* Cập nhật bảng điều khiển với câu hướng dẫn cụ thể: *"Nhấn giữ vào thìa và kéo theo vòng tròn để khuấy."*. Bổ sung banner cảnh báo kịp thời khi thìa đang bị ẩn, khi thí nghiệm đang tạm dừng, hoặc khi WebGL bị gián đoạn.
+  - *Triệt tiêu hiện tượng dịch chuyển đột ngột (teleportation):* Sử dụng cơ chế kéo tương đối mượt mà, giữ nguyên góc và vị trí thìa khi nhấp chuột.
+  - *Kiểm chứng:* Bổ sung test suite [`src/simulation/tests/spoonInteractionUx.test.ts`](src/simulation/tests/spoonInteractionUx.test.ts) (5/5 tests pass).
+- **2. Nhóm 2: Chuyển Động Hạt Tự Nhiên Hơn, Giảm Popping (Particle Visual Smoothing):**
+  - *Nội suy kích thước hạt mượt mà (Scale fade-in):* Khi hạt mới xuất hiện hoặc chuyển vùng, scale hạt tăng êm dịu từ $0.3 r \to 1.0 r$ trong khoảng ~120ms (tương đương 7–8 khung hình ở 60 FPS), loại bỏ hiện tượng hạt nhấp nháy hoặc đột ngột bật ra (popping).
+  - *Lớp cặn đáy nội suy mượt:* Chiều cao lớp cặn cát $S_b$ và đường $G_u$ được nội suy trơn tru giữa các bước thời gian. Tối ưu hóa bằng cách dùng hình trụ đơn vị (unit cylinder) tỷ lệ qua ma trận biến đổi trục Y (`scale.set(1, bedHeight, 1)`) thay vì hủy và tái tạo lại `CylinderGeometry` gây rác bộ nhớ và khựng hình.
+  - *Đóng băng khi tạm dừng & Triệt tiêu khi Reset:* Thang đo hạt đóng băng cố định khi `paused === true`, được xóa sạch về 0 ngay khi gọi `reset()`.
+  - *Cách ly đột biến buffer:* Bộ đệm hiển thị độc lập hoàn toàn với buffer tính toán hạt vật lý; hiệu ứng làm mịn hình ảnh không làm biến đổi bất kỳ giá trị khối lượng nào trong sổ cái khoa học.
+  - *Kiểm chứng:* Bổ sung test suite [`src/simulation/tests/particleVisualSmoothing.test.ts`](src/simulation/tests/particleVisualSmoothing.test.ts) (4/4 tests pass).
+- **3. Nhóm 3: Đồ Thị Khối Lượng Theo Thời Gian (Mass vs. Time SVG Chart):**
+  - *Thành phần đồ thị thuần SVG:* Tạo component [`MassTimeChart.tsx`](src/components/results/MassTimeChart.tsx) vẽ đường biểu diễn khối lượng của 3 chất biến đổi theo thời gian mô phỏng: Đường tan $G_d$ (`#0284c7`), Cát lơ lửng $S_s$ (`#d97706`), và Dầu phân tán $O_d$ (`#eab308`).
+  - *Thời gian mô phỏng chuẩn xác:* Trục hoành sử dụng `elapsedSeconds` từ động cơ khoa học, lấy mẫu ở tần số 5Hz ($\Delta t \ge 0.2$s), hoàn toàn không dùng đồng hồ thực `Date.now()`.
+  - *Giới hạn bộ nhớ đệm an toàn:* Lưu trữ tối đa 300 điểm dữ liệu với cơ chế nén xen kẽ (decimation) khi đầy bộ đệm.
+  - *Xử lý khi tạm dừng:* Cập nhật tại chỗ (in-place update) điểm dữ liệu cuối cùng thay vì tích lũy vô hạn các điểm trùng lặp thời gian.
+  - *Độc lập với camera & Tự động xóa khi Reset:* Việc xoay/đặt lại camera (`cameraRevision`) không làm mất dữ liệu đồ thị; khi thực hiện làm mới thí nghiệm (`generation` thay đổi), đồ thị được dọn sạch về gốc tọa độ.
+  - *Tương tác & Trợ năng:* Hỗ trợ bật/tắt hiển thị từng đường chất tan, đường ngắm chữ thập (crosshair tooltip) xem giá trị chính xác tại từng thời điểm, và bảng đọc số liệu dạng văn bản cho người dùng sử dụng trình đọc màn hình.
+  - *Kiểm chứng:* Bổ sung test suite [`src/simulation/tests/massTimeChart.test.ts`](src/simulation/tests/massTimeChart.test.ts) (4/4 tests pass).
+- **4. Nhóm 4: Thí Nghiệm Mẫu Một Nút (One-Click Preset Experiments):**
+  - *Bốn kịch bản sư phạm định lượng:* Tạo component [`PresetExperiments.tsx`](src/components/presets/PresetExperiments.tsx) với 4 nút nạp nhanh các hiện tượng phổ biến:
+    * **Mẫu A — Đường tan hoàn toàn:** 50ml Nước + 20g Đường (quan sát đường hòa tan trong giới hạn dung tích 100g).
+    * **Mẫu B — Đường bão hòa & lắng dư:** 50ml Nước + 150g Đường (dung dịch bão hòa ở 100g, 50g còn lại tạo lớp cặn lắng dưới đáy).
+    * **Mẫu C — Cát lắng đáy không tan:** 50ml Nước + 30g Cát (toàn bộ cát không tan và nhanh chóng lắng xuống đáy khi dừng khuấy).
+    * **Mẫu D — Dầu tách lớp & phân tán:** 50ml Nước + 40ml Dầu (dầu nổi lên trên; khi khuấy mạnh phân tán thành các giọt nhỏ và tách lớp trở lại khi dừng).
+  - *Nạp hóa chất chuẩn tắc:* Kích hoạt tuần tự `reset()` $\to$ `add()` theo luồng chính thống của hệ thống, kiểm tra tính hợp lệ của từng liều lượng trước khi đưa vào cốc.
+  - *Dialog xác nhận an toàn:* Nếu cốc thí nghiệm đang chứa chất, hệ thống hiển thị hộp thoại xác nhận trước khi làm mới, ngăn việc người dùng vô tình làm mất tiến trình đang thao tác.
+  - *Trạng thái sẵn sàng quan sát:* Sau khi nạp mẫu, hệ thống tự động giữ ở trạng thái tạm dừng (`paused = true`) kèm banner hướng dẫn, giúp người học chủ động bấm "Bắt đầu" hoặc kéo thìa để quan sát quá trình diễn ra từ đầu.
+  - *Kiểm chứng:* Bổ sung test suite [`src/simulation/tests/presetExperiments.test.ts`](src/simulation/tests/presetExperiments.test.ts) (4/4 tests pass).
+- **5. Nhóm 5: Tinh Chỉnh Ánh Sáng, Kính và Bề Mặt Chất Lỏng (Visual Polish & Fluid Meniscus):**
+  - *Hệ thống ánh sáng nổi khối:* Bổ sung nguồn sáng phản xạ sau lưng (back rim light `#e0f2fe`) và đèn điểm tạo bóng sáng nổi bật quanh cốc (`#f8fafc`), tạo cảm giác chiều sâu 3D chân thực cho dụng cụ thí nghiệm thủy tinh.
+  - *Chất liệu thủy tinh quang học trong vắt:* Tinh chỉnh vật liệu `Beaker` với độ mờ `opacity: 0.16`, `roughness: 0.08`, `metalness: 0.04`, giúp quan sát rõ ràng lớp cặn lắng và các hạt bên trong mà không bị hiện tượng mờ đục chắn tầm nhìn.
+  - *Màu sắc chất lỏng đồng bộ:* Nước chuyển sang màu xanh thanh khiết `#7dd3fc`, dầu mang màu hổ phách ấm `#f59e0b`, đồng nhất hoàn toàn với màu sắc nhận diện trên đồ thị và bảng kết quả.
+  - *Mặt khum và gợn sóng chất lỏng:*
+    * Thêm đĩa mặt khum (meniscus disc) trên đỉnh cột chất lỏng.
+    * Gợn sóng dập dềnh nhẹ theo hàm sóng điều hòa phụ thuộc vào cường độ khuấy (`intensity`) và thời gian mô phỏng (`elapsedSeconds`).
+    * Biên độ dao động được chặn trên nghiêm ngặt: $|offsetY| \le 0.004 \times intensity$ (không bao giờ vượt quá $0.005 \times I$).
+    * Khi tạm dừng (`paused === true`) hoặc khi chất lỏng đứng yên (`intensity <= 0`), độ dập dềnh và góc nghiêng triệt tiêu về 0 tuyệt đối.
+    * Tích phân sóng điều hòa bảo toàn độ cao trung bình (mean surface level).
+    * Bán kính đĩa khum $0.867$ nằm hoàn toàn trong lòng cốc ($0.870$), không bao giờ đâm xuyên thành kính.
+  - *Kiểm chứng:* Tạo module [`src/scene/fluidSurfaceRipple.ts`](src/scene/fluidSurfaceRipple.ts) và test suite [`src/simulation/tests/visualFluidPolish.test.ts`](src/simulation/tests/visualFluidPolish.test.ts) (6/6 tests pass).
+- **Tổng kết kiểm chứng chất lượng toàn diện:**
+  - 571/571 bài kiểm tra vượt qua (34/34 test suites) trong 7.7 giây.
+  - TypeScript typecheck (`npm run typecheck`): 0 lỗi.
+  - ESLint (`npm run lint`): 0 lỗi, 0 cảnh báo.
+  - Production build (`npm run build`): Thành công trong 7.38 giây.
+
 ## Khắc Phục Lỗi Bàn Thí Nghiệm Treo "Đang Chuẩn Bị Bàn Thí Nghiệm..." (React 19 Suspense & Lazy Loop) — 2026-10-18
 - **Hiện tượng người dùng gặp:** Khi mở ứng dụng trên trình duyệt (`localhost:5173`), khu vực bàn thí nghiệm 3D ở giữa bị kẹt vô hạn ở trạng thái `Đang chuẩn bị bàn thí nghiệm...`, hoàn toàn không hiển thị cốc 3D và bàn thí nghiệm.
 - **Nguyên nhân cốt lõi (Root Cause):**
@@ -1359,3 +1558,35 @@ Lệnh trực tiếp vừa chạy: `node node_modules/typescript/bin/tsc --noEmi
 
 ## Xác minh không thay đổi ứng dụng
 So sánh SHA-256 trước/sau toàn bộ src/public và package.json/package-lock.json/vite.config.ts/tsconfig.json/eslint.config.js/index.html/.gitignore: giống nhau. Chỉ sửa Markdown; dist là artifact đã build lại. Không chạy install/deploy/git init. Không có automatic approval rejection trong lượt này; npm script exit1 là vấn đề chạy command, không phải bị từ chối phê duyệt.
+
+## Chặng 3 — Rà soát, chuẩn hóa hình học và hoàn thiện hai chế độ tương tác cốc (2026-10-19)
+- **Kiểm tra và xử lý 6 nhóm vấn đề trọng tâm:**
+  1. *Loại bỏ tọa độ rót hardcode sai ngữ cảnh*:
+     - Thay thế toàn bộ các giá trị world cố định (-0.50, 2.75, 0) bằng các offset suy ra động từ tâm cốc `BEAKER_CENTER`, chiều cao vành miệng `BEAKER_RIM_Y = 2.32`, và bán kính cốc `BEAKER_INNER_RADIUS = 0.87`, `BEAKER_OUTER_RADIUS = 0.91`.
+     - Vùng nhận `DROP_ZONE_ENTER_BOUNDS` và vùng duy trì `DROP_ZONE_MAINTAIN_BOUNDS` được đặt cân xứng xung quanh cốc và bao phủ toàn bộ đường tiếp cận vành miệng.
+     - Điểm xuất phát của dòng hạt rót rơi trong scene 3D được tính toán bằng hàm lượng giác `computeSpoutPosition(vesselPos, tiltAngleRad, rVessel, hVessel)` dựa trên ma trận transform của chính cốc nguồn, loại bỏ hoàn toàn hiện tượng lệch dòng chảy khi đổi kích thước hoặc vị trí cốc.
+  2. *Chính sách xử lý gián đoạn nghiêm ngặt (>300ms gap)*:
+     - Khi phát hiện khoảng trống thời gian giữa hai khung hình $dt > 300\text{ ms}$, hàm `terminateOnInterruption()` lập tức chấm dứt phiên rót đang hoạt động:
+       * Tắt hoàn toàn dòng chảy và đặt cờ trạng thái dừng.
+       * Hủy bỏ toàn bộ decitick lẻ chưa được gửi qua engine.
+       * Giải phóng pointer capture và mở khóa điều khiển camera `OrbitControls`.
+       * Giữ nguyên các lượng đã được engine ghi nhận qua ledger trước thời điểm gián đoạn.
+       * Bắt buộc người dùng thực hiện một thao tác click/drag mới để rót tiếp (không tự động khôi phục rót ở frame kế tiếp).
+     - Khi `onPointerUp` được gọi sau một khoảng gián đoạn $> 300\text{ ms}$, phần dư tích lũy cũng bị hủy bỏ hoàn toàn và không thực hiện flush bù.
+  3. *Lọc phản hồi ack và hiển thị khối lượng đã thêm*:
+     - Khối lượng hiển thị chỉ cập nhật khi nhận ack chấp nhận (`ack.accepted = true`).
+     - Sử dụng bộ nhớ Set `acceptedAckSeqSet` để loại bỏ các ack trùng lặp (`ack.duplicate`), các ack bị từ chối (`ack.accepted = false`) tuyệt đối không làm tăng số liệu. Không tạo hàng đợi retry async trái phép.
+  4. *Kẹp giới hạn dung tích 500 ml cho cả 4 chất*:
+     - Cả 4 chất (Nước, Dầu, Đường, Cát) đều được tính thể tích chiếm chỗ chính xác (`occupiedVolumeMilliMl`): Nước 100 milli-ml/decitick, Dầu 100 milli-ml/decitick, Đường 65 milli-ml/decitick (0.65 ml/g), Cát 60 milli-ml/decitick (0.60 ml/g).
+     - Khi dung tích còn lại $< 1\text{ decitick}$, dòng rót lập tức dừng lại, chỉ thông báo một lần tới store mà không spam lỗi từng frame, và camera controls được phục hồi trơn tru khi nhả chuột.
+  5. *Trạng thái Paused & Vòng lặp Render*:
+     - Rót tự do hoạt động bình thường khi mô phỏng đang tạm dừng (`paused = true`), cập nhật khối lượng tức thì mà không làm tăng thời gian khoa học `elapsedSeconds`. Vòng lặp R3F `frameloop="demand"` được kích hoạt vẽ liên tục qua `invalidate()` khi đang kéo/rót.
+  6. *Độc quyền thao tác & Lifecycle an toàn*:
+     - Chặn triệt để xung đột giữa kéo cốc và khuấy thìa thủ công (Mutual Exclusivity) cả khi đang kéo và khi hoạt ảnh rót `activePour` đang diễn ra. Dọn dẹp sạch sẽ tài nguyên khi thả ngoài canvas, ấn phím Escape, mất focus/ẩn tab, reset hay unmount.
+- **Bằng chứng kiểm chứng:**
+  + 27/27 tests pass trong `src/simulation/tests/vesselInteraction.test.ts`.
+  + 613/613 tests pass trên toàn bộ 36 file kiểm thử (`npx vitest run`).
+  + `npm run typecheck`: exit code 0 (`tsc --noEmit`).
+  + `npm run lint`: exit code 0 (`eslint .`).
+  + `npm run build`: exit code 0 (vite production bundle sinh thành công).
+  + Preview server HTTP 200 tại `http://localhost:4173/`.

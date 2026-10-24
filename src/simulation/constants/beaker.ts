@@ -6,9 +6,11 @@ import { VISUAL_ML_PER_GRAM } from './ingredients';
  * Standard defined in SCIENTIFIC_SPEC §4–§6.
  */
 export const BEAKER_CAPACITY_ML = 500;
+export const BEAKER_CENTER = { x: 0.0, y: 0.0, z: 0.0 } as const;
 export const BEAKER_INNER_RADIUS = 0.87; // scene units
 export const BEAKER_OUTER_RADIUS = 0.91; // scene units (glass wall cylinder)
 export const BEAKER_BASE_Y = 0.12;       // bottom inside surface of the beaker
+export const BEAKER_RIM_Y = 2.32;        // top rim torus centerline (standard 500 ml beaker)
 export const BEAKER_FILL_HEIGHT = 2.1;   // height of 500 ml volume in scene units
 export const BEAKER_FILL_TOP = 2.22;      // BEAKER_BASE_Y + BEAKER_FILL_HEIGHT
 export const BEAKER_VOLUME_SCALE = 0.0042; // 2.1 / 500 = 0.0042 scene units per ml

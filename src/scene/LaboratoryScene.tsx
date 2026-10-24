@@ -141,6 +141,7 @@ function WebGLContextHandler() {
   const activeCanvasRevision = useExperimentStore((s) => s.canvasRevision);
 
   useEffect(() => {
+    gl.localClippingEnabled = true;
     const canvas = gl.domElement;
     if (!canvas) return;
 
@@ -303,6 +304,137 @@ function ManualStirSceneWiring({ controlsRef }: { controlsRef: React.RefObject<O
   return null;
 }
 
+/**
+ * Connects 3D vessel pointer events to VesselPourAdapter.
+ */
+function VesselPourSceneWiring({ controlsRef }: { controlsRef: React.RefObject<OrbitControlsHandle | null> }) {
+  const { gl, camera } = useThree();
+
+  useEffect(() => {
+    const bridge = useExperimentStore.getState().getBridge();
+    const adapter = bridge.getVesselAdapter();
+    if (!adapter) return;
+
+    // Connect camera target
+    adapter.setCameraTarget({
+      setEnabled: (enabled: boolean) => {
+        if (controlsRef.current) {
+          controlsRef.current.enabled = enabled;
+        }
+      },
+      isEnabled: () => (controlsRef.current ? Boolean(controlsRef.current.enabled) : true),
+    });
+
+    // Connect capture target
+    adapter.setCaptureTarget({
+      setPointerCapture: (pointerId: number) => {
+        try {
+          gl.domElement.setPointerCapture(pointerId);
+        } catch {
+          // Headless environments
+        }
+      },
+      releasePointerCapture: (pointerId: number) => {
+        try {
+          gl.domElement.releasePointerCapture(pointerId);
+        } catch {
+          // Ignore
+        }
+      },
+      hasPointerCapture: (pointerId: number) => {
+        try {
+          return gl.domElement.hasPointerCapture ? gl.domElement.hasPointerCapture(pointerId) : false;
+        } catch {
+          return false;
+        }
+      },
+    });
+
+    const raycaster = new Raycaster();
+    const ndc = new Vector2();
+
+    const handlePointerMove = (e: PointerEvent) => {
+      if (adapter.getActivePointerId() !== e.pointerId) return;
+
+      const rect = gl.domElement.getBoundingClientRect();
+      if (rect.width <= 0 || rect.height <= 0) return;
+      ndc.x = ((e.clientX - rect.left) / rect.width) * 2 - 1;
+      ndc.y = -(((e.clientY - rect.top) / rect.height) * 2 - 1);
+
+      raycaster.setFromCamera(ndc, camera);
+      adapter.onPointerMove(e.pointerId, raycaster.ray);
+      bridge.notifySceneInvalidate();
+    };
+
+    const handlePointerUp = (e: PointerEvent) => {
+      if (adapter.getActivePointerId() === e.pointerId) {
+        const rect = gl.domElement.getBoundingClientRect();
+        if (rect.width > 0 && rect.height > 0) {
+          ndc.x = ((e.clientX - rect.left) / rect.width) * 2 - 1;
+          ndc.y = -(((e.clientY - rect.top) / rect.height) * 2 - 1);
+          raycaster.setFromCamera(ndc, camera);
+          adapter.onPointerUp(e.pointerId, raycaster.ray);
+        } else {
+          adapter.onPointerUp(e.pointerId);
+        }
+        bridge.notifySceneInvalidate();
+      }
+    };
+
+    const handlePointerCancel = (e: PointerEvent) => {
+      if (adapter.getActivePointerId() === e.pointerId) {
+        adapter.onPointerCancel(e.pointerId);
+        bridge.notifySceneInvalidate();
+      }
+    };
+
+    const handleLostCapture = (e: PointerEvent) => {
+      if (adapter.getActivePointerId() === e.pointerId) {
+        adapter.onLostCapture(e.pointerId);
+        bridge.notifySceneInvalidate();
+      }
+    };
+
+    const handleKeyDown = (e: KeyboardEvent) => {
+      if (e.key === 'Escape' && adapter.isDragging()) {
+        adapter.onEscapeKey();
+        bridge.notifySceneInvalidate();
+      }
+    };
+
+    const handleBlur = () => {
+      if (adapter.isDragging()) {
+        adapter.onWindowBlur();
+        bridge.notifySceneInvalidate();
+      }
+    };
+
+    const dom = gl.domElement;
+    dom.addEventListener('pointermove', handlePointerMove);
+    dom.addEventListener('pointerup', handlePointerUp);
+    dom.addEventListener('pointercancel', handlePointerCancel);
+    dom.addEventListener('lostpointercapture', handleLostCapture);
+    window.addEventListener('keydown', handleKeyDown);
+    window.addEventListener('blur', handleBlur);
+    document.addEventListener('visibilitychange', handleBlur);
+
+    return () => {
+      dom.removeEventListener('pointermove', handlePointerMove);
+      dom.removeEventListener('pointerup', handlePointerUp);
+      dom.removeEventListener('pointercancel', handlePointerCancel);
+      dom.removeEventListener('lostpointercapture', handleLostCapture);
+      window.removeEventListener('keydown', handleKeyDown);
+      window.removeEventListener('blur', handleBlur);
+      document.removeEventListener('visibilitychange', handleBlur);
+      adapter.cleanup();
+      adapter.setCameraTarget(undefined);
+      adapter.setCaptureTarget(undefined);
+    };
+  }, [gl, camera, controlsRef]);
+
+  return null;
+}
+
 export default function LaboratoryScene() {
   const snapshot = useExperimentStore((s) => s.snapshot);
   const showRod = useExperimentStore((s) => s.showRod);
@@ -310,6 +442,8 @@ export default function LaboratoryScene() {
   const canvasRevision = useExperimentStore((s) => s.canvasRevision);
   const webglStatus = useExperimentStore((s) => s.webglStatus);
   const retryCanvas = useExperimentStore((s) => s.retryCanvas);
+  const draggedVessel = useExperimentStore((s) => s.draggedVessel);
+  const isBeakerHighlighted = Boolean(draggedVessel?.isNearBeaker || draggedVessel?.isTouchingBeaker);
   const orbitRef = useRef<OrbitControlsHandle>(null);
 
   if (webglStatus === 'context_lost') {
@@ -348,20 +482,36 @@ export default function LaboratoryScene() {
         shadows
         dpr={[1, 1.75]}
         frameloop="demand"
-        camera={{ position: [3.7, 3.1, 5.2], fov: 39 }}
+        camera={{ position: [3.9, 3.4, 5.5], fov: 42 }}
+        gl={{ localClippingEnabled: true }}
         fallback={<WebGLFallbackView status="unsupported" onRetry={retryCanvas} />}
       >
         <SceneInvalidationBridge />
         <WebGLContextHandler />
         <ManualStirSceneWiring controlsRef={orbitRef} />
+        <VesselPourSceneWiring controlsRef={orbitRef} />
         <color attach="background" args={['#edf3f3']} />
         <ambientLight intensity={1.5} />
         <directionalLight position={[3, 7, 4]} intensity={3} castShadow />
         <directionalLight position={[-4, 3, -2]} intensity={1.5} color="#b8deed" />
-        <IngredientVessels />
-        <Beaker />
-        <WaterVolume volume={regions.aqueous.volumeMl} base={regions.aqueous.bottom} />
-        <OilVolume volume={regions.oil.volumeMl} base={regions.oil.bottom} />
+        <directionalLight position={[0, 4, -5]} intensity={1.2} color="#e0f2fe" />
+        <pointLight position={[0, 1.5, 1.2]} intensity={0.6} distance={4} color="#f8fafc" />
+        <IngredientVessels liquidTop={regions.liquidTop} />
+        <Beaker isHighlighted={isBeakerHighlighted} />
+        <WaterVolume
+          volume={regions.aqueous.volumeMl}
+          base={regions.aqueous.bottom}
+          intensity={snapshot.intensity}
+          elapsedSeconds={snapshot.elapsedSeconds}
+          paused={snapshot.paused}
+        />
+        <OilVolume
+          volume={regions.oil.volumeMl}
+          base={regions.oil.bottom}
+          intensity={snapshot.intensity}
+          elapsedSeconds={snapshot.elapsedSeconds}
+          paused={snapshot.paused}
+        />
         <ParticleRenderer
           regions={regions}
           sandMass={Math.max(0, snapshot.mass.Sb)}
@@ -393,7 +543,7 @@ export default function LaboratoryScene() {
         <OrbitControls
           ref={orbitRef}
           makeDefault
-          target={[0, 1.1, 0]}
+          target={[0, 1.25, 0]}
           enablePan={false}
           minDistance={3.8}
           maxDistance={9}

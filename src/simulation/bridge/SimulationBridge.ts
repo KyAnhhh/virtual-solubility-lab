@@ -18,6 +18,9 @@ import type { IngredientId } from '../../types/experiment';
 import {
   ManualStirAdapter,
 } from '../../interactions/ManualStirAdapter';
+import {
+  VesselPourAdapter,
+} from '../../interactions/VesselPourAdapter';
 
 export interface HostClockAdapter {
   now: () => number;
@@ -48,6 +51,7 @@ export interface BridgeOptions {
   onSnapshot?: (snapshot: ScalarSnapshot) => void;
   onInvalidateScene?: () => void;
   manualAdapter?: ManualStirAdapter;
+  vesselAdapter?: VesselPourAdapter;
 }
 
 export const TICK_PUBLISH_INTERVAL_MS = 100; // ~10Hz scalar publish throttling
@@ -73,6 +77,7 @@ export class SimulationBridge {
   private readonly sceneInvalidateSubscribers = new Set<() => void>();
 
   private manualAdapter?: ManualStirAdapter;
+  private vesselAdapter?: VesselPourAdapter;
 
   private rafHandle: number | null = null;
   private isSchedulerRunning = false;
@@ -89,6 +94,8 @@ export class SimulationBridge {
       engine: this.engine,
       facade: this.facade,
     });
+    this.vesselAdapter = options?.vesselAdapter ?? new VesselPourAdapter();
+    this.vesselAdapter.setBridgeTarget(this);
 
     this.currentSnapshot = this.engine.snapshot();
 
@@ -107,6 +114,23 @@ export class SimulationBridge {
 
   setManualAdapter(adapter?: ManualStirAdapter): void {
     this.manualAdapter = adapter;
+    if (adapter) {
+      adapter.setGetIsVesselDragging(() => Boolean(this.vesselAdapter?.isBusy()));
+    }
+  }
+
+  getVesselAdapter(): VesselPourAdapter | undefined {
+    return this.vesselAdapter;
+  }
+
+  setVesselAdapter(adapter?: VesselPourAdapter): void {
+    this.vesselAdapter = adapter;
+    if (adapter) {
+      adapter.setBridgeTarget(this);
+    }
+    if (this.manualAdapter) {
+      this.manualAdapter.setGetIsVesselDragging(() => Boolean(this.vesselAdapter?.isBusy()));
+    }
   }
 
   getEngine(): HeadlessSimulationEngine {
@@ -178,6 +202,7 @@ export class SimulationBridge {
     this.isContextLost = true;
     this.stopScheduler();
     this.manualAdapter?.onContextLost();
+    this.vesselAdapter?.onReset();
     this.pause();
   }
 
@@ -239,6 +264,7 @@ export class SimulationBridge {
         this.manualAdapter?.onPause();
       } else if (intent.type === 'reset') {
         this.manualAdapter?.onReset();
+        this.vesselAdapter?.onReset();
       } else if (intent.type === 'setMode' && intent.mode !== 'manual') {
         this.manualAdapter?.onModeChange(intent.mode);
       } else if (intent.type === 'releaseDrive') {
@@ -439,6 +465,7 @@ export class SimulationBridge {
       const isHidden = (doc as unknown as { hidden?: boolean })?.hidden ?? false;
       if (isHidden) {
         this.manualAdapter?.onPageHidden();
+        this.vesselAdapter?.onWindowBlur();
         this.engine.suspend();
       } else {
         this.engine.visible();
@@ -451,6 +478,7 @@ export class SimulationBridge {
 
     const onBlur = () => {
       this.manualAdapter?.onWindowBlur();
+      this.vesselAdapter?.onWindowBlur();
     };
 
     doc?.addEventListener('visibilitychange', onVisibilityChange);
@@ -480,6 +508,7 @@ export class SimulationBridge {
       this.lifecycleCleanup = null;
     }
     this.manualAdapter?.detach();
+    this.vesselAdapter?.cleanup();
     this.stopScheduler();
     this.snapshotSubscribers.clear();
     this.sceneInvalidateSubscribers.clear();

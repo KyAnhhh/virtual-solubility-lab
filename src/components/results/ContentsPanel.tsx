@@ -14,6 +14,7 @@ import {
   INITIAL_HYSTERESIS_STATE,
   updateHysteresisState,
 } from './contentsHelpers';
+import { MassTimeChart } from './MassTimeChart';
 
 export function ContentsPanel() {
   const deciTicks = useExperimentStore((s) => s.deciTicks);
@@ -67,8 +68,8 @@ export function ContentsPanel() {
         ))}
       </dl>
 
-      <div style={{ marginTop: '16px', borderTop: '1px solid #edf1f2', paddingTop: '14px' }}>
-        <h3 style={{ fontSize: '13px', margin: '0 0 10px 0', color: '#244c5b' }}>
+      <div style={{ marginTop: '10px', borderTop: '1px solid #edf1f2', paddingTop: '8px' }}>
+        <h3 style={{ fontSize: '12px', margin: '0 0 6px 0', color: '#244c5b' }}>
           Pha nước – đường (Mô hình khoa học)
         </h3>
         <dl>
@@ -110,8 +111,8 @@ export function ContentsPanel() {
       </div>
 
       {snapshot.mass.St > 0 && (
-        <div style={{ marginTop: '14px', borderTop: '1px solid #edf1f2', paddingTop: '12px' }}>
-          <h3 style={{ fontSize: '13px', margin: '0 0 10px 0', color: '#244c5b' }}>
+        <div style={{ marginTop: '8px', borderTop: '1px solid #edf1f2', paddingTop: '6px' }}>
+          <h3 style={{ fontSize: '12px', margin: '0 0 6px 0', color: '#244c5b' }}>
             Pha cát — Huyền phù & lắng (Không tan)
           </h3>
           <dl>
@@ -132,8 +133,8 @@ export function ContentsPanel() {
       )}
 
       {snapshot.mass.Ot > 0 && (
-        <div style={{ marginTop: '14px', borderTop: '1px solid #edf1f2', paddingTop: '12px' }}>
-          <h3 style={{ fontSize: '13px', margin: '0 0 10px 0', color: '#244c5b' }}>
+        <div style={{ marginTop: '8px', borderTop: '1px solid #edf1f2', paddingTop: '6px' }}>
+          <h3 style={{ fontSize: '12px', margin: '0 0 6px 0', color: '#244c5b' }}>
             Pha dầu — Nhũ tương & tách lớp (Không tan)
           </h3>
           <dl>
@@ -224,6 +225,9 @@ export function ContentsPanel() {
       }}>
         <strong>Nhận xét: </strong>{evaluation.explanation}
       </div>
+
+      {/* Group 3: Mass vs Time Chart */}
+      <MassTimeChart />
 
       {/* Visual Legend */}
       <div style={{ marginTop: '16px', borderTop: '1px solid #edf1f2', paddingTop: '12px' }}>

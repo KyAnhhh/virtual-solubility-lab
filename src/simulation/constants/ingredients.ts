@@ -1,5 +1,17 @@
 import type { DeciTicks, IngredientDefinition, IngredientId, Quantities } from '../../types/experiment';
 
+/**
+ * Physical Beaker Capacity and Unit Conversions Contract:
+ * - 1 ingredient decitick = 0.1 physical unit (0.1 ml for water/oil, 0.1 g for sugar/sand).
+ * - Total beaker capacity is 500 ml = 500,000 milli-ml.
+ * - Occupied volume per ingredient decitick:
+ *   * Water: 0.1 ml = 100 milli-ml / decitick.
+ *   * Oil:   0.1 ml = 100 milli-ml / decitick.
+ *   * Sugar: 0.1 g * 0.65 ml/g = 0.065 ml = 65 milli-ml / decitick.
+ *   * Sand:  0.1 g * 0.60 ml/g = 0.060 ml = 60 milli-ml / decitick.
+ * - NOTE: Ingredient deciticks are discrete integer amounts on the mass/volume ledger,
+ *   completely independent and distinct from continuous simulation clock ticks (h = 1/60 s).
+ */
 export const CAPACITY_ML = 500;
 export const CAPACITY_MILLI_ML = 500_000;
 
@@ -7,10 +19,10 @@ export const CAPACITY_MILLI_ML = 500_000;
 export const VISUAL_ML_PER_GRAM = { sugar: 0.65, sand: 0.6 };
 
 export const VISUAL_MILLI_ML_PER_TICK: Record<IngredientId, number> = {
-  water: 100,
-  oil: 100,
-  sugar: 65,
-  sand: 60,
+  water: 100, // 100 milli-ml per decitick (0.1 ml)
+  oil: 100,   // 100 milli-ml per decitick (0.1 ml)
+  sugar: 65,  // 65 milli-ml per decitick (0.1 g * 0.65 ml/g)
+  sand: 60,   // 60 milli-ml per decitick (0.1 g * 0.60 ml/g)
 };
 
 export const INGREDIENTS: IngredientDefinition[] = [
@@ -118,4 +130,31 @@ export function formatPhaseMass(massGrams: number, unit = 'g'): string {
   const fracPart = Math.round((rounded - intPart) * 10);
   if (fracPart === 0) return `${intPart} ${unit}`;
   return `${intPart},${fracPart} ${unit}`;
+}
+
+/**
+ * Manipulation speeds for interactive Free Pouring mode (decitick/s = 0.1 unit/s).
+ * - Water: 25 ml/s = 250 decitick/s
+ * - Oil: 15 ml/s = 150 decitick/s
+ * - Sugar: 10 g/s = 100 decitick/s
+ * - Sand: 10 g/s = 100 decitick/s
+ * Note: These are UI interaction cadence parameters, not physical experimental kinetics.
+ */
+export const FREE_POUR_RATES: Record<IngredientId, number> = {
+  water: 250,
+  oil: 150,
+  sugar: 100,
+  sand: 100,
+};
+
+/**
+ * Calculates remaining integer deciticks of an ingredient that can physically fit
+ * within the 500,000 milli-ml capacity of the 500 ml beaker.
+ */
+export function getAvailableCapacityTicks(ingredient: IngredientId, currentTicks: DeciTicks): number {
+  const currentOccMilliMl = occupiedVolumeMilliMl(currentTicks);
+  const remainingMilliMl = Math.max(0, CAPACITY_MILLI_ML - currentOccMilliMl);
+  const milliPerTick = VISUAL_MILLI_ML_PER_TICK[ingredient];
+  if (milliPerTick <= 0) return 0;
+  return Math.floor(remainingMilliMl / milliPerTick);
 }

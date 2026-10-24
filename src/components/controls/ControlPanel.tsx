@@ -104,14 +104,16 @@ export function ControlPanel() {
               lineHeight: 1.4,
             }}
           >
-            <strong>Kéo thìa thủ công:</strong> Chọn thủ công, kéo thìa để khuấy. Thả chuột để ngừng truyền lực.
+            <strong>Kéo thìa thủ công:</strong> Nhấn giữ vào thìa và kéo theo vòng tròn để khuấy.
           </div>
-          <div style={{ fontSize: '11px', color: '#64748b', textAlign: 'center' }}>
+          <div style={{ fontSize: '11px', color: '#64748b', textAlign: 'center', lineHeight: 1.4 }}>
             {!showRod
               ? 'Hiện thìa khuấy để sử dụng tính năng kéo thìa thủ công.'
+              : isContextBlocked
+              ? 'Không gian 3D đang gián đoạn — vui lòng bấm Thử lại 3D trước.'
               : paused
               ? 'Mô phỏng đang tạm dừng — tiếp tục mô phỏng để kéo thìa.'
-              : 'Dùng chuột kéo thìa trong cốc 3D để tạo lực khuấy.'}
+              : 'Dùng chuột nhấn giữ vào thìa và kéo theo vòng tròn để khuấy.'}
           </div>
         </div>
       ) : mode === 'auto' ? (
@@ -189,24 +191,28 @@ export function ControlPanel() {
         </div>
       )}
 
-      <h2>Góc quan sát</h2>
-      <div className="gesture">
-        <span>↔</span>
-        <div>
-          <strong>Xoay quanh cốc</strong>
-          <p>Kéo chuột hoặc vuốt một ngón</p>
+      <div className="camera-section" style={{ marginTop: '12px', borderTop: '1px solid #edf1f2', paddingTop: '10px' }}>
+        <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: '6px' }}>
+          <h2 style={{ margin: 0, fontSize: '13px' }}>Góc quan sát</h2>
+          <button
+            className="secondary"
+            onClick={resetCamera}
+            style={{ padding: '4px 8px', fontSize: '11px', cursor: 'pointer' }}
+            title="Đặt lại camera về góc nhìn mặc định"
+          >
+            ↺ Đặt lại góc nhìn
+          </button>
         </div>
+        <details style={{ fontSize: '11px', color: '#64748b', marginBottom: '8px' }}>
+          <summary style={{ cursor: 'pointer', userSelect: 'none', color: '#0369a1' }}>
+            Hướng dẫn thao tác chuột / cử chỉ
+          </summary>
+          <div style={{ marginTop: '6px', display: 'flex', flexDirection: 'column', gap: '4px', paddingLeft: '8px' }}>
+            <div>↔ <strong>Xoay:</strong> Kéo chuột trái hoặc vuốt một ngón</div>
+            <div>⊕ <strong>Thu phóng:</strong> Cuộn chuột hoặc chụm hai ngón</div>
+          </div>
+        </details>
       </div>
-      <div className="gesture">
-        <span>⊕</span>
-        <div>
-          <strong>Phóng to / thu nhỏ</strong>
-          <p>Cuộn chuột hoặc chụm hai ngón</p>
-        </div>
-      </div>
-      <button className="secondary w-full" onClick={resetCamera}>
-        ↺ Đặt lại góc nhìn
-      </button>
 
       <div className="rod-toggle">
         <label htmlFor="rod">Hiển thị thìa khuấy</label>

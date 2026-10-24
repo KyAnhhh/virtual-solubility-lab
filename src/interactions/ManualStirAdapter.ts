@@ -86,6 +86,7 @@ export class ManualStirAdapter {
   private captureTarget?: PointerCaptureTarget;
   private cameraTarget?: CameraControlTarget;
   private getShowRod?: () => boolean;
+  private getIsVesselDragging?: () => boolean;
   private capturedPointerId: number | null = null;
   private isCleaningUp = false;
 
@@ -121,6 +122,10 @@ export class ManualStirAdapter {
 
   setGetShowRod(fn?: () => boolean): void {
     this.getShowRod = fn;
+  }
+
+  setGetIsVesselDragging(fn?: () => boolean): void {
+    this.getIsVesselDragging = fn;
   }
 
   getCapturedPointerId(): number | null {
@@ -209,6 +214,11 @@ export class ManualStirAdapter {
 
     // 7. Guard: Only one pointer owner (if already dragging, reject second pointer)
     if (this.controller.isDragActive()) {
+      return { accepted: false, pose: this.engine.getRodPose(), omega: 0 };
+    }
+
+    // 8. Guard: Vessel dragging mutual exclusivity (cannot stir while pouring/dragging vessel)
+    if (this.getIsVesselDragging && this.getIsVesselDragging()) {
       return { accepted: false, pose: this.engine.getRodPose(), omega: 0 };
     }
 
